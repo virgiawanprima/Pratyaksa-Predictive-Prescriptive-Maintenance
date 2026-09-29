@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "PRATYAKSA — Arsitektur Predictive Maintenance AIoT",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "git@github.com:virgiawanprima/pratyaksa.git",
+      "provider": "github",
+      "link_mode": "local-only",
+      "revision": "31ea64934c1ffd1bdea62d82693d0031fcee49f9"
+    },
+    "viewBox": [1150, 650]
+  },
+  "components": [
+    { "id": "edge-unit", "type": "external", "label": "Edge Node RPi", "sublabel": "ADXL345 + MAX6675 + Nextion", "pos": [40, 300], "size": [150, 70], "sources": [{ "path": "edge/main.py", "line": 30, "label": "sensor loop" }] },
+    { "id": "mosquitto", "type": "messagebus", "label": "Mosquitto MQTT", "sublabel": ":6883 MQTT · :6884 WS", "pos": [214, 300], "size": [150, 70] },
+    { "id": "bridge", "type": "backend", "label": "bridge.py", "sublabel": "MQTT → Redis fanout", "pos": [388, 300], "size": [140, 70], "sources": [{ "path": "bridge.py", "line": 24, "label": "STREAM_PREFIX" }] },
+    { "id": "streams", "type": "messagebus", "label": "Redis Streams", "sublabel": "stream:sensors:{tipe_alat}", "pos": [552, 300], "size": [150, 70], "sources": [{ "path": "api/app.py", "line": 576, "label": "STREAM_PREFIX" }] },
+    { "id": "api", "type": "backend", "label": "FastAPI Inference API", "sublabel": "XGBoost + LSTM · MC Dropout", "tag": ":6010", "pos": [726, 300], "size": [170, 80], "sources": [{ "path": "api/app.py", "line": 497, "label": "core inference" }] },
+    { "id": "redis", "type": "database", "label": "Redis", "sublabel": "result TTL 1h · pub/sub", "pos": [920, 300], "size": [150, 70] },
+    { "id": "simulator", "type": "external", "label": "Stream Simulator", "sublabel": "30 unit × 4 tipe (dev/demo)", "pos": [520, 480], "size": [170, 70], "sources": [{ "path": "simulator/stream_simulator.py", "line": 35, "label": "STREAM_PREFIX" }] },
+    { "id": "airflow", "type": "backend", "label": "Airflow 2.9.1", "sublabel": "retrain · drift · data-quality", "tag": ":6080", "pos": [300, 480], "size": [160, 70], "sources": [{ "path": "docker-container/airflow/Dockerfile", "line": 1, "label": "build image" }] },
+    { "id": "mlflow", "type": "backend", "label": "MLflow 3.13", "sublabel": "experiment tracking", "tag": ":6050", "pos": [960, 480], "size": [150, 70] },
+    { "id": "pg", "type": "database", "label": "PostgreSQL + TimescaleDB", "sublabel": "sensor_readings · predictions", "tag": ":5432", "pos": [726, 480], "size": [170, 70], "sources": [{ "path": "database/schema.sql", "line": 1, "label": "skema tabel" }] },
+    { "id": "prometheus", "type": "backend", "label": "Prometheus", "sublabel": "scrape /metrics", "tag": ":6090", "pos": [726, 110], "size": [150, 60] },
+    { "id": "grafana", "type": "frontend", "label": "Grafana", "sublabel": "dashboard operasional", "tag": ":6001", "pos": [920, 110], "size": [150, 60] }
+  ],
+  "boundaries": [
+    { "kind": "region", "label": "Docker network — pratyaksa-net", "wraps": ["mosquitto", "bridge", "streams", "api", "redis", "simulator", "airflow", "mlflow", "pg", "prometheus", "grafana"] },
+    { "kind": "security-group", "label": "Data plane — ingest & inferensi", "wraps": ["streams", "api", "redis", "pg"] }
+  ],
+  "connections": [
+    { "id": "edge-mqtt", "from": "edge-unit", "to": "mosquitto", "label": "MQTT edge/data (auth)", "variant": "emphasis", "fromSide": "right", "toSide": "left", "labelDy": -29 },
+    { "id": "mqtt-bridge", "from": "mosquitto", "to": "bridge", "label": "subscribe edge/data", "labelDy": -29 },
+    { "id": "bridge-stream", "from": "bridge", "to": "streams", "label": "XADD fanout per tipe alat", "labelDy": 66 },
+    { "id": "streams-api", "from": "streams", "to": "api", "label": "XREADGROUP pratyaksa-analytics", "variant": "emphasis", "labelDy": 70 },
+    { "id": "api-redis", "from": "api", "to": "redis", "label": "result TTL 1h · publish predictions", "labelDy": -34 },
+    { "id": "api-pg", "from": "api", "to": "pg", "label": "INSERT batch (batcher)", "fromSide": "bottom", "toSide": "top", "labelDy": 50 },
+    { "id": "sim-stream", "from": "simulator", "to": "streams", "label": "XADD langsung (dev/demo)", "variant": "dashed", "fromSide": "top", "toSide": "bottom" },
+    { "id": "prom-api", "from": "prometheus", "to": "api", "label": "scrape /metrics", "fromSide": "bottom", "toSide": "top", "labelDy": 24 },
+    { "id": "grafana-prom", "from": "grafana", "to": "prometheus", "label": "datasource PromQL", "labelDy": -29 },
+    { "id": "airflow-pg", "from": "airflow", "to": "pg", "label": "metadata db 'airflow' · laporan drift/dq", "fromSide": "bottom", "toSide": "bottom", "via": [[380, 585], [811, 585]], "labelSegment": 1, "labelDy": 18 },
+    { "id": "mlflow-pg", "from": "mlflow", "to": "pg", "label": "backend store experiments", "labelDy": -29 }
+  ]
+}

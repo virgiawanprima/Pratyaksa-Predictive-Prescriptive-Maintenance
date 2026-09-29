@@ -10,7 +10,7 @@ Dokumen ini untuk **teman** yang ingin mengambil data prediktif maintenance dari
 
 | Item | Nilai |
 |------|-------|
-| **API URL** | `http://192.168.1.90:6000` |
+| **API URL** | `http://192.168.1.90:6010` |
 | **API Key** | `YOUR_API_KEY` |
 | **Header Auth** | `X-API-Key` |
 | **Interval Data** | Setiap **5 detik** (real-time) |
@@ -64,7 +64,7 @@ X-API-Key: YOUR_API_KEY
 ### 1. Cek Koneksi
 
 ```bash
-curl http://192.168.1.90:6000/health
+curl http://192.168.1.90:6010/health
 ```
 
 Response:
@@ -83,7 +83,7 @@ Response:
 ### 2. Status Semua Alat (Fleet)
 
 ```bash
-curl http://192.168.1.90:6000/fleet \
+curl http://192.168.1.90:6010/fleet \
   -H "X-API-Key: YOUR_API_KEY"
 ```
 
@@ -113,7 +113,7 @@ Response:
 ### 3. Detail Per Alat
 
 ```bash
-curl http://192.168.1.90:6000/result/WA600-001 \
+curl http://192.168.1.90:6010/result/WA600-001 \
   -H "X-API-Key: YOUR_API_KEY"
 ```
 
@@ -132,7 +132,7 @@ Asset ID yang tersedia:
 ### 4. Prediksi Kerusakan (POST)
 
 ```bash
-curl -X POST http://192.168.1.90:6000/predict \
+curl -X POST http://192.168.1.90:6010/predict \
   -H "X-API-Key: YOUR_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
@@ -150,7 +150,7 @@ curl -X POST http://192.168.1.90:6000/predict \
 ### 5. Buat Work Order
 
 ```bash
-curl -X POST "http://192.168.1.90:6000/workorder?component=brake&risk_score=0.85" \
+curl -X POST "http://192.168.1.90:6010/workorder?component=brake&risk_score=0.85" \
   -H "X-API-Key: YOUR_API_KEY"
 ```
 
@@ -163,7 +163,7 @@ Parameter:
 ### 6. Daftar Sensor
 
 ```bash
-curl http://192.168.1.90:6000/features \
+curl http://192.168.1.90:6010/features \
   -H "X-API-Key: YOUR_API_KEY"
 ```
 
@@ -172,7 +172,7 @@ curl http://192.168.1.90:6000/features \
 ### 7. Spek OpenAPI (buat generate client code)
 
 ```bash
-curl http://192.168.1.90:6000/openapi.json \
+curl http://192.168.1.90:6010/openapi.json \
   -H "X-API-Key: YOUR_API_KEY"
 ```
 
@@ -187,7 +187,7 @@ Bisa di-parse Rust dengan crate `progenitor` atau `openapi-generator`.
 ```
 ┌──────────────────────┐   setiap 5 detik   ┌──────────────────┐
 │  PRATYAKSA API       │◄──────────────────│  Rust Middleware   │
-│  192.168.1.90:6000   │   polling fleet     │  (cache + proxy)  │
+│  192.168.1.90:6010   │   polling fleet     │  (cache + proxy)  │
 └──────────────────────┘                    └────────┬─────────┘
                                                      │
                                                      ▼
@@ -204,7 +204,7 @@ use reqwest::Client;
 use tokio::time::{interval, Duration};
 use std::collections::HashMap;
 
-const URL: &str = "http://192.168.1.90:6000";
+const URL: &str = "http://192.168.1.90:6010";
 const KEY: &str = "YOUR_API_KEY";
 const HEADER: &str = "X-API-Key";
 
@@ -293,8 +293,8 @@ export const usePratyaksa = () => {
 ## ✅ Quick Checklist
 
 - [ ] Bisa `ping 192.168.1.90`
-- [ ] `curl http://192.168.1.90:6000/health` → `{"status":"ok"}`
-- [ ] `curl http://192.168.1.90:6000/fleet -H "X-API-Key: YOUR_API_KEY"` → daftar asset
+- [ ] `curl http://192.168.1.90:6010/health` → `{"status":"ok"}`
+- [ ] `curl http://192.168.1.90:6010/fleet -H "X-API-Key: YOUR_API_KEY"` → daftar asset
 - [ ] Buat Rust middleware polling tiap 5 detik
 - [ ] Nuxt.js ambil dari Rust, bukan langsung
 

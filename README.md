@@ -168,7 +168,7 @@ Telegram Bot | CMMS (2 arah)
 
 | Service | Host Port |
 |---------|:---------:|
-| FastAPI Inference API | **6000** |
+| FastAPI Inference API | **6010** |
 | Grafana Dashboard | **6001** |
 | MLflow Tracking | **6050** |
 | Airflow Webserver | **6080** |
@@ -208,7 +208,7 @@ Telegram Bot | CMMS (2 arah)
 - Docker & Docker Compose
 - Python 3.11+ (untuk pengembangan *offline*)
 - Git
-- Port 6000, 6001, 6050, 6080, 6090, 6883 tersedia
+- Port 6001, 6010, 6050, 6080, 6090, 6883 tersedia (semua host-port wajib di range 6000-6999)
 
 ### 1. Clone Repository
 
@@ -241,10 +241,10 @@ docker compose ps
 
 ```bash
 # Health check
-curl http://localhost:6000/health
+curl http://localhost:6010/health
 
 # Prediksi sample
-curl -X POST http://localhost:6000/predict \
+curl -X POST http://localhost:6010/predict \
   -H "X-API-Key: YOUR_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"asset_id":"test-001","equipment_type":"haul_truck","features":[1.0]*37}'
@@ -254,8 +254,8 @@ curl -X POST http://localhost:6000/predict \
 
 | Layanan | URL | Kredensial |
 |---------|-----|------------|
-| **FastAPI Docs** | http://localhost:6000/docs | — |
-| **Grafana** | http://localhost:6001 | `admin` / `pratyaksa2026` |
+| **FastAPI Docs** | http://localhost:6010/docs | — |
+| **Grafana** | http://localhost:6001 | `admin` / nilai `GRAFANA_PASSWORD` di `.env` |
 | **MLflow** | http://localhost:6050 | — |
 | **Airflow** | http://localhost:6080 | — |
 | **Prometheus** | http://localhost:6090 | — |
@@ -274,7 +274,7 @@ docker compose down
 |---------|:----:|-----------|
 | **pratyaksa-redis** | 6379* | Redis 7 — Streams, pub/sub, cache result (TTL 1h) |
 | **pratyaksa-postgres** | 5432* | TimescaleDB 16 — *Hypertable* sensor + prediction (*compress* 30d, *retain* 2y) |
-| **pratyaksa-api** | 6000 | FastAPI — *Inference engine* (predict, explain, workorder, fleet, health) |
+| **pratyaksa-api** | 6010 | FastAPI — *Inference engine* (predict, explain, workorder, fleet, health) |
 | **pratyaksa-mlflow** | 6050 | MLflow 3.13 — *Experiment tracking* (Postgres backend) |
 | **pratyaksa-prometheus** | 6090 | Prometheus — *Metrics scraping* (30d *retention*) |
 | **pratyaksa-grafana** | 6001 | Grafana — *Fleet dashboard* + *unified alerting* |
@@ -421,7 +421,7 @@ Proyek PRATYAKSA terbagi menjadi dua repositori yang saling melengkapi:
 ### Alur Data Lintas Repo
 
 ```
-Sensor/Edge → FastAPI Inference (port 6000) → REST API → Rust Backend (port 8080) → Nuxt Dashboard (port 80)
+Sensor/Edge → FastAPI Inference (port 6010) → REST API → Rust Backend (port 8080) → Nuxt Dashboard (port 80)
                                                   ↓
                                            Telegram Bot (gRPC) → Notifikasi CRITICAL
 ```
