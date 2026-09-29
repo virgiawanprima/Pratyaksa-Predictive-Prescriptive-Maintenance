@@ -4,15 +4,18 @@ from airflow.operators.python import PythonOperator
 import pandas as pd
 import numpy as np
 import json
+import logging
 from pathlib import Path
 from scipy.stats import ks_2samp
+
+logger = logging.getLogger(__name__)
 
 def detect_drift():
     ref = pd.read_parquet("/opt/airflow/artifacts/split_train.parquet")
     yesterday = (datetime.now() - timedelta(1)).strftime("%Y-%m-%d")
     daily_path = Path(f"/opt/airflow/data/daily/{yesterday}.parquet")
     if not daily_path.exists():
-        print(f"No daily data for {yesterday}, skipping drift detection")
+        logger.warning("No daily data for %s, skipping drift detection", yesterday)
         return
     curr = pd.read_parquet(daily_path)
     report = {}

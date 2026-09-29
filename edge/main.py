@@ -1,11 +1,19 @@
 import time
 import json
+import logging
 import os
 import signal
+import threading
 from pathlib import Path
 from .inference import EdgeInference
 from .mqtt_edge import EdgeMQTT
 from .nextion import NextionAlert
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+)
+logger = logging.getLogger("pratyaksa.edge")
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 META_PATH = BASE_DIR / "artifacts" / "artifact_deploy_meta.json"
@@ -33,10 +41,10 @@ def read_sensors() -> dict:
     })
     return data
 
-running = True
+shutdown_event = threading.Event()
+
 def shutdown(signum, frame):
-    global running
-    running = False
+    shutdown_event.set()
 signal.signal(signal.SIGINT, shutdown)
 signal.signal(signal.SIGTERM, shutdown)
 
@@ -45,8 +53,8 @@ def main():
     mqtt = EdgeMQTT(broker=BROKER, port=PORT)
     mqtt.connect()
     alert = NextionAlert(port=NEXTION_PORT)
-    print(f"Edge node started. Asset: {ASSET_ID}, Type: {EQUIPMENT_TYPE}")
-    while running:
+    logger.info("Edge node started. Asset: %s, Type: %s", ASSET_ID, EQUIPMENT_TYPE)
+    while not shutdown_event.is_set():
         try:
             data = read_sensors()
             data["asset_id"] = ASSET_ID
@@ -64,12 +72,13 @@ def main():
             mqtt.publish(payload)
             if twin.get("alert_level", "normal") in ["warning", "critical"]:
                 alert.send(twin["alert_level"], f"Risk:{risk:.2f}")
-            time.sleep(1)
-        except Exception as e:
-            print("Error:", e)
-            time.sleep(1)
+            # Event.wait: shutdown signal langsung memutus tidur (responsif SIGINT/SIGTERM)
+            shutdown_event.wait(1.0)
+        except Exception:
+            logger.exception("Edge loop error")
+            shutdown_event.wait(1.0)
     mqtt.disconnect()
-    print("Edge node stopped.")
+    logger.info("Edge node stopped.")
 
 if __name__ == "__main__":
     main()

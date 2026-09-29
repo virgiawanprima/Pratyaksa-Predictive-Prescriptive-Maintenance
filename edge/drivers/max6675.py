@@ -13,6 +13,10 @@ class MAX6675:
         GPIO.setup(self.data, GPIO.IN)
 
     def read_temp(self):
+        # Timing sesuai datasheet MAX6675: CS low-to-clock setup ~2ms; konversi penuh
+        # (0.17-0.22s) terjadi saat CS HIGH di antara pembacaan. Bit-bang 1us/clock
+        # via time.sleep tidak presisi di Linux non-RT; untuk produksi pertimbangkan
+        # hardware SPI (spidev) - butuh validasi wiring CS->CE0 sebelum diubah.
         GPIO.output(self.cs, GPIO.LOW)
         time.sleep(0.002)
         raw = 0
