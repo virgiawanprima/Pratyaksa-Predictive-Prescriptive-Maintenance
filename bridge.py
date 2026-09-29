@@ -1,12 +1,26 @@
+"""MQTT to Redis Streams bridge.
+
+Subscribes to edge/data topic and fans sensor readings out to per-equipment
+Redis streams consumed by the PRATYAKSA inference API.
+"""
 import json
+import logging
 import os
 
 import paho.mqtt.client as mqtt
 import redis
 
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+)
+logger = logging.getLogger("pratyaksa.bridge")
+
 REDIS_HOST = os.getenv("REDIS_HOST", "redis")
-MQTT_USER = os.getenv("MQTT_USER", "pratyaksa")
-MQTT_PASS = os.getenv("MQTT_PASS", "pratyaksa_mqtt")
+MQTT_USER = os.environ.get("MQTT_USER")
+MQTT_PASS = os.environ.get("MQTT_PASS")
+if not MQTT_USER or not MQTT_PASS:
+    raise RuntimeError("MQTT_USER/MQTT_PASS tidak diset — atur via .env atau environment variable")
 STREAM_PREFIX = "stream:sensors:"
 
 r = redis.Redis(host=REDIS_HOST, port=6379, decode_responses=True)
@@ -31,7 +45,7 @@ FITUR_KOLOM = [
 
 def on_connect(client, userdata, flags, rc):
     client.subscribe("edge/data")
-    print("Bridge connected to MQTT")
+    logger.info("Bridge connected to MQTT (rc=%s)", rc)
 
 
 def on_message(client, userdata, msg):
@@ -47,9 +61,9 @@ def on_message(client, userdata, msg):
             "timestamp": data.get("timestamp", ""),
             "features": json.dumps(features),
         })
-        print(f"Data masuk ke Redis Stream: {stream_key}")
-    except Exception as e:
-        print("Bridge error:", e)
+        logger.info("Data masuk ke Redis Stream: %s", stream_key)
+    except Exception:
+        logger.exception("Bridge error memproses pesan MQTT")
 
 
 client = mqtt.Client()
@@ -58,4 +72,5 @@ client.on_message = on_message
 client.username_pw_set(MQTT_USER, MQTT_PASS)
 
 client.connect("mosquitto", 1883, 60)
+logger.info("Bridge starting loop_forever")
 client.loop_forever()

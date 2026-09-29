@@ -12,6 +12,7 @@ import base64
 import json
 import logging
 import os
+import secrets
 import time
 from collections import deque
 from contextlib import asynccontextmanager
@@ -23,8 +24,9 @@ import joblib
 import numpy as np
 import redis.asyncio as aioredis
 import xgboost as xgb
-from fastapi import Depends, FastAPI, HTTPException, Security
+from fastapi import Depends, FastAPI, HTTPException, Request, Security
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.security import APIKeyHeader
 
 # Keras 3 Native Imports
@@ -46,7 +48,10 @@ import matplotlib.pyplot as plt
 
 # Async Database
 from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncEngine
+
+from redis.exceptions import RedisError
 
 from prometheus_fastapi_instrumentator import Instrumentator
 
@@ -92,7 +97,8 @@ def _load_valid_keys() -> set:
 _VALID_KEYS = _load_valid_keys()
 
 async def verify_api_key(api_key: str = Security(API_KEY_HEADER)) -> str:
-    if api_key not in _VALID_KEYS:
+    # secrets.compare_digest: timing-safe, mencegah pemulihan key via timing attack
+    if not any(secrets.compare_digest(api_key.encode(), k.encode()) for k in _VALID_KEYS):
         raise HTTPException(status_code=403, detail="Invalid API Key")
     return api_key
 
@@ -249,15 +255,25 @@ class DigitalTwin:
 
 
 # ---------- Hierarchy enforcement ----------
+def _minsafe(a, b):
+    """np.minimum array-safe; hasil scalar dikembalikan sebagai float (JSON-safe)."""
+    r = np.minimum(a, b)
+    return float(r) if np.ndim(r) == 0 else r
+
 def enforce_hierarchy(preds: dict) -> dict:
+    """Min-propagation rantai part ≤ component ≤ subsystem.
+
+    Array-safe (np.minimum): mendukung scalar maupun batch ndarray.
+    min() bawaan Python crash untuk ndarray (ambiguous truth value).
+    """
     chains = [
         ('RUL_pump_seal_main', 'RUL_hydraulic_pump', 'RUL_hydraulic_system'),
         ('RUL_brake_pad_rear', 'RUL_brake_caliper', 'RUL_brake_system'),
     ]
     for part, comp, subs in chains:
         if all(k in preds for k in [part, comp, subs]):
-            preds[comp] = min(preds[comp], preds[subs])
-            preds[part] = min(preds[part], preds[comp])
+            preds[comp] = _minsafe(preds[comp], preds[subs])
+            preds[part] = _minsafe(preds[part], preds[comp])
     return preds
 
 
@@ -571,6 +587,7 @@ async def consume_sensor_streams() -> None:
         except Exception:
             pass
 
+    backoff = 1.0
     while True:
         try:
             streams = {f"{STREAM_PREFIX}{etype}": '>' for etype in EXPERT_TYPES}
@@ -579,6 +596,7 @@ async def consume_sensor_streams() -> None:
                 streams=streams, count=20, block=1000,
             )
             if not messages:
+                backoff = 1.0
                 continue
 
             readings = []
@@ -619,12 +637,14 @@ async def consume_sensor_streams() -> None:
 
             for stream_key, msg_id in msg_acks:
                 await _redis.xack(stream_key, group_name, msg_id)
+            backoff = 1.0
 
         except asyncio.CancelledError:
             break
         except Exception:
             logger.exception("Stream consumer loop error")
-            await asyncio.sleep(5)
+            await asyncio.sleep(backoff)
+            backoff = min(backoff * 2, 60)
 
 
 # ---------- Lifespan ----------
@@ -682,7 +702,7 @@ async def lifespan(app: FastAPI):
             _db_engine = create_async_engine(
                 async_db_url,
                 pool_size=10,
-                max_overflow=20,
+                max_overflow=10,  # PG max_connections dibagi bersama Airflow/MLflow/Grafana
                 connect_args={"server_settings": {"jit": "off"}}
             )
             async with _db_engine.connect() as conn:
@@ -738,13 +758,30 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=os.environ.get("CORS_ORIGINS", "http://localhost:3000").split(","),
     allow_credentials=False,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST"],
+    allow_headers=["X-API-Key", "Content-Type"],
 )
 
 Instrumentator().instrument(app).expose(app, endpoint="/metrics")
+
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    """Header keamanan dasar untuk semua response API."""
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    return response
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    """Log unhandled errors with context and return a safe JSON 500 response."""
+    logger.exception("Unhandled error pada %s %s", request.method, request.url.path)
+    return JSONResponse(status_code=500, content={"detail": "Internal server error"})
 
 
 # ---------- Pydantic models ----------
@@ -831,7 +868,11 @@ async def get_latest_result(asset_id: str):
     raw = await _redis.get(f"result:{asset_id}")
     if not raw:
         raise HTTPException(404, "Not found")
-    return json.loads(raw)
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        logger.error("Data korup di Redis untuk asset %s", asset_id)
+        raise HTTPException(status_code=502, detail="Corrupted result data")
 
 
 @app.get("/health")
@@ -839,15 +880,15 @@ async def health():
     redis_ok, db_ok = False, False
     try:
         redis_ok = bool(await _redis.ping())
-    except:
-        pass
+    except (RedisError, OSError) as e:
+        logger.warning("Health check: Redis ping gagal: %s", e)
     try:
         if _db_engine:
             async with _db_engine.connect() as conn:
                 await conn.execute(text("SELECT 1"))
             db_ok = True
-    except:
-        pass
+    except (SQLAlchemyError, OSError) as e:
+        logger.warning("Health check: PostgreSQL gagal: %s", e)
 
     return {
         "status": "ok" if (redis_ok and len(_expert_models) == len(EXPERT_TYPES)) else "degraded",
@@ -883,8 +924,9 @@ async def reload_models():
 
         _scaler, _xgb_model, _expert_models = new_scaler, new_xgb, new_experts
         return {"status": "success", "message": "Models hot-swapped successfully."}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        logger.exception("Model hot-reload gagal")
+        raise HTTPException(status_code=500, detail="Model reload failed")
 
 
 @app.get("/features", dependencies=[Depends(verify_api_key)])
