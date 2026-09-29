@@ -36,6 +36,9 @@ services:
   postgres:
     image: timescale/timescaledb:latest-pg16
     container_name: pratyaksa-postgres
+    # max_connections=25 (default image) tidak cukup: API pool (10+10) + Airflow
+    # (pool 5+3 x2) + MLflow + Grafana + Timescale workers → habis & psql CLI gagal.
+    command: ["postgres", "-c", "max_connections=200"]
     environment:
       POSTGRES_DB: pratyaksa
       POSTGRES_USER: pratyaksa
@@ -72,7 +75,7 @@ services:
       - ./artifacts:/app/artifacts:ro
       - ./schema_config.json:/app/schema_config.json:ro
     ports:
-      - "6000:6000"
+      - "6010:6000"
     networks:
       - pratyaksa-net
     depends_on:
@@ -95,6 +98,11 @@ services:
   mlflow:
     image: ghcr.io/mlflow/mlflow:v3.13.0
     container_name: pratyaksa-mlflow
+    environment:
+      # Security middleware MLflow 3.5+ (docs: self-hosting/security/network):
+      # default hanya localhost → akses via IP LAN diblok 403. Izinkan host & origin LAN.
+      MLFLOW_SERVER_ALLOWED_HOSTS: "localhost:*,127.0.0.1:*,10.14.35.110:*"
+      MLFLOW_SERVER_CORS_ALLOWED_ORIGINS: "http://localhost:6050,http://10.14.35.110:6050,http://localhost:*,http://127.0.0.1:*"
     command: >
       sh -c "pip install psycopg2-binary &&
       mlflow server
@@ -202,10 +210,13 @@ services:
       context: .
       dockerfile: docker-container/airflow/Dockerfile
     container_name: pratyaksa-airflow-scheduler
+    command: scheduler
     environment:
       - AIRFLOW__CORE__EXECUTOR=LocalExecutor
-      - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://postgres:${POSTGRES_PASSWORD}@postgres:5432/pratyaksa
+      - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://pratyaksa:${POSTGRES_PASSWORD}@postgres:5432/airflow
       - AIRFLOW__CORE__LOAD_EXAMPLES=False
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_POOL_SIZE=5
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_MAX_OVERFLOW=3
       - PRATYAKSA_API_KEYS=${PRATYAKSA_API_KEYS}
     volumes:
       - ./airflow/dags:/opt/airflow/dags
@@ -234,8 +245,14 @@ services:
       - "6080:8080"
     environment:
       - AIRFLOW__CORE__EXECUTOR=LocalExecutor
-      - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://postgres:${POSTGRES_PASSWORD}@postgres:5432/pratyaksa
+      - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://pratyaksa:${POSTGRES_PASSWORD}@postgres:5432/airflow
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_POOL_SIZE=5
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_MAX_OVERFLOW=3
       - PRATYAKSA_API_KEYS=${PRATYAKSA_API_KEYS}
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./artifacts:/opt/airflow/artifacts
+      - ./data:/opt/airflow/data
     depends_on:
       airflow-scheduler: { condition: service_started }
     networks:
@@ -271,7 +288,9 @@ services:
     networks:
       - pratyaksa-net
     healthcheck:
-      test: ["CMD", "mosquitto_sub", "-t", "$$SYS/#", "-C", "1", "-i", "healthcheck", "-W", "3"]
+      # Healthcheck WAJIB pakai kredensial: broker auth aktif → koneksi anonim
+      # ditolak ("not authorised") sehingga container selalu unhealthy.
+      test: ["CMD-SHELL", "mosquitto_sub -t '$$SYS/#' -C 1 -i healthcheck -u $$MQTT_USER -P $$MQTT_PASS -W 3"]
       interval: 30s
       timeout: 10s
       retries: 3

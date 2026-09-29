@@ -14,7 +14,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 USER airflow
 
 # Install pinned ML & provider packages
+# ATURAN constraints 2.9.1: perintah pip yang bisa mengubah versi core WAJIB
+# menyertakan "apache-airflow==X.Y.Z" agar tidak ter-upgrade diam-diam.
+# Provider versi kompatibel Airflow 2.9.1 (dari constraints-2.9.1/3.11):
+#   postgres==5.10.2, http==4.10.1  (versi 6.x menuntut core 3.x → korup)
 RUN pip install --no-cache-dir \
+    "apache-airflow==2.9.1" \
     pandas==2.3.3 \
     xgboost==3.2.0 \
     keras==3.14.1 \
@@ -22,5 +27,13 @@ RUN pip install --no-cache-dir \
     scikit-learn==1.8.0 \
     joblib==1.5.3 \
     pyarrow==24.0.0 \
-    apache-airflow-providers-postgres==6.7.1 \
-    apache-airflow-providers-http==6.0.3
+    "apache-airflow-providers-postgres==5.10.2" \
+    "apache-airflow-providers-http==4.10.1" \
+    # TF 2.21 butuh protobuf>=6.31.1; OTEL 1.24 membutuhkan protobuf<5 → konflik.
+    # Pin keluarga OTEL 1.45.0 (terbukti kompatibel TF 2.21 + protobuf 6.x;
+    # memenuhi syarat airflow: opentelemetry-api>=1.15.0):
+    "opentelemetry-api==1.45.0" \
+    "opentelemetry-sdk==1.45.0" \
+    "opentelemetry-proto==1.45.0" \
+    "opentelemetry-exporter-otlp-proto-grpc==1.45.0" \
+    "opentelemetry-exporter-otlp-proto-http==1.45.0"
