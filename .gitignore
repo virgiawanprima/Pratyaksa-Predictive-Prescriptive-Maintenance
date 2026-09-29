@@ -56,6 +56,9 @@ grafana_data/
 prometheus_data/
 data/daily/
 
+# Credential file Mosquitto (dihasilkan mosquitto_passwd, jangan pernah di-commit)
+mosquitto/config/passwd
+
 # ==============================================================================
 # 5. JUPYTER NOTEBOOK & AI TOOLS
 # ==============================================================================
